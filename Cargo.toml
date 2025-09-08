@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 full = "0.3.0"
-poem = "3.1.7"
+poem = { version = "3.1.12", features = ["prometheus"]}
 serde = "1.0.219"
-tokio = { version = "1.46.1", features = ["full"] }
-serde_json = "1.0.140"
+tokio = { version = "1.47.1", features = ["full"] }
+serde_json = "1.0.143"
+oidc-jwt-validator = "0.2.3"
+reqwest = "0.11.27"
+prometheus = "0.14.0"
+chrono = "0.4.41"

@@ -2,3 +2,6 @@ pub mod config;
 pub mod app;
 pub mod status;
 pub mod articles;
+pub mod auth;
+pub mod logging;
+pub mod exporter;
