@@ -1,19 +1,13 @@
-use std::sync::Arc;
-
 use poem::{ Server, listener::TcpListener};
-use simple_api_rs::{ config::Config, app, articles::ArticleList, articles::ArticleStore, exporter::Metrics};
+use simple_api_rs::{ app, config::Config};
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
 
-    let Config { port, addr, log, .. } = Config::default();
+    let config = Config::default();
+    let app = app::builder(&config).await;
 
-    log.info(format!("Starting server on port: {}...", port)).await;
-
-    let store = ArticleStore::new(&ArticleList::new());
-    let app = app::builder(store.clone(),Arc::new(log));
-
-    Server::new(TcpListener::bind(format!("{}:{}", addr, port)))
+    Server::new(TcpListener::bind(format!("{}:{}", config.addr, config.port)))
         .run(app)
         .await
 }

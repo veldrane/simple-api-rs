@@ -1,11 +1,8 @@
-
-use super::logging::Logger;
-
 pub struct Config {
     pub port: u16,
     pub prefix: String,
     pub addr: String,
-    pub log: Logger,
+    pub log_output: String,
 }
 
 impl Default for Config {
@@ -14,7 +11,7 @@ impl Default for Config {
             port: 8080,
             prefix: String::from("/api/v1"),
             addr: String::from("0.0.0.0"),
-            log: Logger::build(),
+            log_output: String::from("console"),
         }
     }
 }

@@ -1,3 +1,5 @@
+#![allow(unused_imports, unused_variables, unused_mut)]
+
 use serde::{Deserialize, Serialize};
 use poem::{
     Endpoint, Error, FromRequest, Request, RequestBody, Result, Route, get, handler,

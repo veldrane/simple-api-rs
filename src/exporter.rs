@@ -21,8 +21,13 @@ impl Metrics {
         registry.register(Box::new(posted_articles.clone())).unwrap();
         registry.register(Box::new(get_articles.clone())).unwrap();
 
-        
+
         Self { posted_articles,
                get_articles }
+    }
+
+    pub fn build() -> Metrics {
+        let registry = Registry::new();
+        Metrics::new(&registry)
     }
 }

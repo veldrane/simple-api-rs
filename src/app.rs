@@ -1,10 +1,11 @@
 use poem::{ endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter}, get, post, middleware::AddDataEndpoint, Route };
 use std::sync::Arc;
 
-use crate::{articles::{ get_article_by_id, post_article }, status::up};
-use crate::articles::{ get_articles, ArticleStore };
+use crate::{articles::{ get_article_by_id, post_article }, config::Config, status::up};
+use crate::articles::{ get_articles, ArticleStore, ArticleList };
 use crate::logging::Logger;
 use crate::exporter::Metrics;
+
 
 type DynHandler = BoxEndpoint<'static, poem::Response>;
 
@@ -21,15 +22,23 @@ pub struct AppState {
     pub store: ArticleStore,
     pub log: Arc<Logger>,
     pub metrics: Metrics
-}   
+}
 
-pub fn builder(store: ArticleStore, log: Arc<Logger>) -> AddDataEndpoint<Route, AppState> {
+impl AppState {
+    pub fn build(config: &Config, metrics: Metrics) -> Self {
+
+        let store = ArticleStore::new(&ArticleList::new());
+        let log = Arc::new(Logger::build(&config.log_output));
+
+        AppState { store, log, metrics }
+    }
+}
+
+pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
 
     let registry = prometheus::Registry::new();
-
-    let metrics = Metrics::new(&registry);
-
-    let state = AppState { store, log, metrics };
+    let state = AppState::build(&config, Metrics::new(&registry));
+    let log = state.log.clone();
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -57,8 +66,11 @@ pub fn builder(store: ArticleStore, log: Arc<Logger>) -> AddDataEndpoint<Route, 
         .into_iter()
         .fold(Route::new(), |app, def| app.at(def.path, def.handler))
         .nest("/metrics", PrometheusExporter::new(registry.clone()))
-        .data(state)
-; // přidáme sdílená data
+        .data(state);
+
+    log.info("Application initialized".into()).await;
+    log.info(format!("Starting server on {}:{}", config.addr, config.port)).await;
+
 
     route
 }

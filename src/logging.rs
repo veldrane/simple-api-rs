@@ -19,11 +19,11 @@ struct LogMessage(LogType,String);
 
 impl Logger {
 
-    pub fn build() -> Self {
+    pub fn build(output: &str) -> Self {
         
-
+        let log_output = get_output(output);
         let (tx, rx): (mpsc::Sender<LogMessage>, mpsc::Receiver<LogMessage>) = mpsc::channel(100);
-        let logger =   tokio::spawn(log_receiver(rx));
+        let logger =   tokio::spawn(log_receiver(rx, log_output));
         let logger = Logger {
             tx,
             _logger: logger,
@@ -49,9 +49,28 @@ impl Logger {
 
 
 
-async fn log_receiver(mut rx: mpsc::Receiver<LogMessage>) {
+async fn log_receiver<T: LogOutput + Send + 'static>(mut rx: mpsc::Receiver<LogMessage>, logger: T) {
     while let Some(log_message) = rx.recv().await {
+        logger.log(log_message);
+    }
+}
 
+
+fn get_output(output: &str) -> impl LogOutput + Send + 'static {
+    match output {
+        "console" => ConsoleLogger,
+        _ => ConsoleLogger,
+    }
+}
+
+trait LogOutput {
+    fn log(&self, log_message: LogMessage);
+}
+
+struct ConsoleLogger;
+
+impl LogOutput for ConsoleLogger {
+    fn log(&self, log_message: LogMessage) {
         let timestamp =  Utc::now().to_string();
         match log_message.0 {
             LogType::Info => println!("{} {} {}",timestamp,"---| Info:", log_message.1),
