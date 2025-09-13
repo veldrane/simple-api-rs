@@ -1592,6 +1592,7 @@ dependencies = [
  "openssl",
  "poem",
  "prometheus",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",

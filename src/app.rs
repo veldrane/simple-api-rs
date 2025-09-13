@@ -1,10 +1,11 @@
 use poem::{ endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter}, get, post, middleware::AddDataEndpoint, Route };
 use std::sync::Arc;
 
-use crate::{articles::{ get_article_by_id, post_article }, config::Config, status::up};
+use crate::{articles::{ get_article_by_id, post_article }, config::Config, fault_inject, status::up};
 use crate::articles::{ get_articles, ArticleStore, ArticleList };
 use crate::logging::Logger;
 use crate::exporter::Metrics;
+use crate::fault_inject::FaultInject;
 
 
 type DynHandler = BoxEndpoint<'static, poem::Response>;
@@ -39,6 +40,11 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let registry = prometheus::Registry::new();
     let state = AppState::build(&config, Metrics::new(&registry));
     let log = state.log.clone();
+    let fault_inject = FaultInject::new()
+        .with_error_rate(0.1)
+        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(100))
+        .with_timeout(std::time::Duration::from_secs(2))
+        .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -61,10 +67,14 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
                      // <– EndpointExt::boxed()
         },
     ];
-    // skládáme Route::new() .at(path, handler) pro každou definici
-    let route = routes
-        .into_iter()
-        .fold(Route::new(), |app, def| app.at(def.path, def.handler))
+
+    let api_only =  routes
+    .into_iter()
+    .fold(Route::new(), |app, def| app.at(def.path, def.handler))
+    .with(fault_inject);
+
+    let route=  Route::new()
+        .nest("/", api_only)
         .nest("/metrics", PrometheusExporter::new(registry.clone()))
         .data(state);
 
