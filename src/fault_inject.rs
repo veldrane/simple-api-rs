@@ -2,7 +2,8 @@ use poem::{http::StatusCode, Endpoint, IntoResponse, Middleware, Request, Respon
 use rand::Rng;
 use std::time::Duration;
 use tokio::time::sleep;
-use crate::app::AppState;
+use crate::{app::AppState, articles::GeneralResponse};
+use tracing::{info, info_span};
 
 #[derive(Clone)]
 pub struct FaultInject {
@@ -55,22 +56,44 @@ impl<E: Endpoint> Endpoint for FaultInjectEndpoint<E> {
         let data = req.data::<AppState>().unwrap();
         let log = &data.log.clone();
 
+
+
         log.info("Hello from FaultInject middleware".into()).await;
         // 1) Umělá latence
-        if self.cfg.max_delay > self.cfg.min_delay {
+        let extra: Duration = if self.cfg.max_delay > self.cfg.min_delay {
             let spread = self.cfg.max_delay - self.cfg.min_delay;
-            let extra = self.cfg.min_delay + Duration::from_millis(
+            self.cfg.min_delay + Duration::from_millis(
                 rng.gen_range(0..=spread.as_millis() as u64)
-            );
-            sleep(extra).await;
-        } else if self.cfg.min_delay > Duration::from_millis(0) {
-            sleep(self.cfg.min_delay).await;
-        }
+            )
+        } else {
+            Duration::from_millis(0)
+        };
+        
+        let delay_span = info_span!(
+            "fault.delay",
+            fault_injected = true,
+            reason = "delay",
+            delay_ms = extra.as_millis() as u64
+        );
+
+        let _eds = delay_span.enter();
+        log.info(format!("Injecting delay of {:?}ms", extra.as_millis())).await;
+        sleep(extra).await;
+
 
         // 2) Fuzzy chyba
-        //if rng.gen_range::<f32>() < self.cfg.error_rate {
-        //    return Err(Error::from_status(self.cfg.status_on_error));
+        //if rng.gen_range(0.0f32..1.0f32) < self.cfg.error_rate {
+        //    return Ok(GeneralResponse::<()>::InternalError.into_response());
         //}
+
+        let process_span = info_span!(
+            "endpoint.process",
+            fault_injected = true,
+            reason = "process",
+            endpoint = req.uri().path() as &str
+        );
+
+        let _eps = process_span.enter();
 
         let res = self.inner.call(req).await;
 
@@ -85,6 +108,5 @@ impl<E: Endpoint> Endpoint for FaultInjectEndpoint<E> {
                 Err(e)
             },
         }
-
     }
 }

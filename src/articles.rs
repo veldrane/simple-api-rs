@@ -31,7 +31,8 @@ pub enum GeneralResponse<T> {
     NotFound,
     Busy,
     BadRequest,
-    Forbidden
+    Forbidden,
+    InternalError,
 }
 
 impl<T: Serialize + Send> IntoResponse for GeneralResponse<T>
@@ -54,6 +55,9 @@ impl<T: Serialize + Send> IntoResponse for GeneralResponse<T>
             GeneralResponse::Forbidden => poem::Response::builder()
                 .status(poem::http::StatusCode::FORBIDDEN)
                 .body(serde_json::json!({"error": "Access denied"}).to_string()),
+            GeneralResponse::InternalError => poem::Response::builder()
+                .status(poem::http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(serde_json::json!({"error": "Internal server error"}).to_string()),
         }
     }
 }

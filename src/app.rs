@@ -1,12 +1,19 @@
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use poem::{ endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter}, get, post, middleware::AddDataEndpoint, Route };
+use poem::middleware::OpenTelemetryTracing;
 use std::sync::Arc;
 
-use crate::{articles::{ get_article_by_id, post_article }, config::Config, fault_inject, status::up};
+use crate::{articles::{ get_article_by_id, post_article }, config::Config, status::up};
 use crate::articles::{ get_articles, ArticleStore, ArticleList };
 use crate::logging::Logger;
 use crate::exporter::Metrics;
 use crate::fault_inject::FaultInject;
 
+
+use opentelemetry::{global, trace::TracerProvider as _};
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::{SdkTracerProvider, Tracer}, Resource};
+use opentelemetry_otlp::Protocol;
+use std::time::Duration;
 
 type DynHandler = BoxEndpoint<'static, poem::Response>;
 
@@ -46,6 +53,9 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
         .with_timeout(std::time::Duration::from_secs(2))
         .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
 
+    let tracer_provider = init_tracer();
+    let tracer = tracer_provider.tracer("simple-api-rs");
+
     let routes: Vec<RouteDef> = vec![
         RouteDef {
             path: "/api/v1/status",
@@ -71,6 +81,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let api_only =  routes
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
+    .with(OpenTelemetryTracing::new(tracer))
     .with(fault_inject);
 
     let route=  Route::new()
@@ -83,4 +94,21 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
 
 
     route
+}
+
+
+fn init_tracer() -> SdkTracerProvider {
+    global::set_text_map_propagator(TraceContextPropagator::new());
+    SdkTracerProvider::builder()
+        .with_resource(Resource::builder().with_service_name("server2").build())
+        .with_batch_exporter(
+            opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_protocol(Protocol::Grpc)
+                .with_endpoint("http://localhost:4317")
+                .with_timeout(Duration::from_secs(3))
+                .build()
+                .expect("Trace exporter should initialize."),
+        )
+        .build()
 }
