@@ -1,25 +1,37 @@
-use opentelemetry_otlp::{SpanExporter, WithExportConfig};
-use poem::{ endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter}, get, post, middleware::AddDataEndpoint, Route };
-use poem::middleware::OpenTelemetryTracing;
-use std::sync::Arc;
+// std
+use std::{sync::Arc, time::Duration};
 
-use crate::{articles::{ get_article_by_id, post_article }, config::Config, status::up};
-use crate::articles::{ get_articles, ArticleStore, ArticleList };
-use crate::logging::Logger;
-use crate::exporter::Metrics;
-use crate::fault_inject::FaultInject;
+// poem
+use poem::{
+    endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter},
+    get, post, middleware::{AddDataEndpoint, OpenTelemetryTracing},
+    Response, Route,
+};
 
-
+// OpenTelemetry
 use opentelemetry::{global, trace::TracerProvider as _};
-use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::{SdkTracerProvider, Tracer}, Resource};
-use opentelemetry_otlp::Protocol;
-use std::time::Duration;
+use opentelemetry_otlp::{Protocol, WithExportConfig};
+use opentelemetry_sdk::{
+    propagation::TraceContextPropagator,
+    trace::{SdkTracerProvider},
+    Resource,
+};
 
-type DynHandler = BoxEndpoint<'static, poem::Response>;
+// tracing
+use tracing_subscriber::layer::SubscriberExt;
 
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+// local crate
+use crate::{
+    articles::{get_article_by_id, get_articles, post_article, ArticleList, ArticleStore},
+    config::Config,
+    exporter::Metrics,
+    fault_inject::FaultInject,
+    logging::Logger,
+    status::up,
+};
 
-
+// handy alias
+type DynHandler = BoxEndpoint<'static, Response>;
 
 // 3) Struktura popisující jednu routu
 struct RouteDef {
@@ -55,19 +67,18 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
         .with_timeout(std::time::Duration::from_secs(2))
         .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
 
-    let tracer_provider = init_tracer();
-    let tracer = tracer_provider.tracer("simple-api-trace");
+    let tracer = init_tracer().tracer("simple-api-trace");
+
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
     let subscriber = tracing_subscriber::Registry::default().with(otel_layer);
+
     tracing::subscriber::set_global_default(subscriber)
         .expect("Unable to set global subscriber.");
-
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
             path: "/api/v1/status",
             handler: get(up).boxed(),
-     // <– EndpointExt::boxed()
         },
         RouteDef {
             path: "/api/v1/articles",
@@ -76,12 +87,10 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
         RouteDef {
             path: "/api/v1/article/:1",
             handler: get(get_article_by_id).boxed(),
-        // <– EndpointExt::boxed()
         },
         RouteDef {
             path: "/api/v1/article",
             handler: post(post_article).boxed(),
-                     // <– EndpointExt::boxed()
         },
     ];
 
@@ -99,7 +108,6 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     log.info("Application initialized".into()).await;
     log.info(format!("Starting server on {}:{}", config.addr, config.port)).await;
 
-
     route
 }
 
@@ -112,24 +120,12 @@ fn init_tracer() -> SdkTracerProvider {
             opentelemetry_otlp::SpanExporter::builder()
                 .with_tonic()
                 .with_protocol(Protocol::Grpc)
-                .with_endpoint("http://172.19.230.60:9821")
+                .with_endpoint("http://localhost:9821")
                 .with_timeout(Duration::from_secs(3))
                 .build()
                 .expect("Trace exporter should initialize."),
         )
         .build();
 
-
     provider
-
-}
-
-
-fn init_tracing_subscriber(tracer: opentelemetry_sdk::trace::Tracer) {
-    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer()) // ať vidíš logy v konzoli
-        .with(otel_layer)                        // <<< BRIDGE
-        .try_init()
-        .ok(); // vyhni se panicu, když je už jednou initnuto
 }
