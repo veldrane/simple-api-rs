@@ -18,7 +18,7 @@ use opentelemetry_sdk::{
 };
 
 // tracing
-use tracing_subscriber::{layer::SubscriberExt, registry};
+use tracing_subscriber::layer::SubscriberExt;
 
 // local crate
 use crate::{
@@ -64,11 +64,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let state = AppState::build(&config);
     let log = state.log.clone();
     let exporter = PrometheusExporter::new(state.registry.clone());
-    let fault_inject = FaultInject::new()
-        .with_error_rate(0.1)
-        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(500))
-        .with_timeout(std::time::Duration::from_secs(2))
-        .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
+    let fault_inject = FaultInject::default();
     let tracer = init_tracer().tracer("simple-api-trace");
 
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());

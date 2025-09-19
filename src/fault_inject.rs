@@ -32,6 +32,17 @@ impl FaultInject {
     pub fn with_status(mut self, status: StatusCode) -> Self { self.status_on_error = status; self }
 }
 
+impl Default for FaultInject {
+    fn default() -> Self {
+
+        FaultInject::new()
+        .with_error_rate(0.1)
+        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(500))
+        .with_timeout(std::time::Duration::from_secs(2))
+        .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
 impl<E: Endpoint> Middleware<E> for FaultInject {
     type Output = FaultInjectEndpoint<E>;
 
