@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use crate::{app::AppState, articles::GeneralResponse};
 use tracing::{info, info_span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Clone)]
 pub struct FaultInject {
@@ -68,6 +69,8 @@ impl<E: Endpoint> Endpoint for FaultInjectEndpoint<E> {
         } else {
             Duration::from_millis(0)
         };
+
+        tracing::Span::current().context();
         
         let delay_span = info_span!(
             "fault.delay",

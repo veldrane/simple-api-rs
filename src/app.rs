@@ -17,6 +17,8 @@ use std::time::Duration;
 
 type DynHandler = BoxEndpoint<'static, poem::Response>;
 
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 
 
 // 3) Struktura popisující jednu routu
@@ -49,12 +51,17 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let log = state.log.clone();
     let fault_inject = FaultInject::new()
         .with_error_rate(0.1)
-        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(100))
+        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(500))
         .with_timeout(std::time::Duration::from_secs(2))
         .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
 
     let tracer_provider = init_tracer();
-    let tracer = tracer_provider.tracer("simple-api-rs");
+    let tracer = tracer_provider.tracer("simple-api-trace");
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
+    let subscriber = tracing_subscriber::Registry::default().with(otel_layer);
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Unable to set global subscriber.");
+
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -99,16 +106,30 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
 
 fn init_tracer() -> SdkTracerProvider {
     global::set_text_map_propagator(TraceContextPropagator::new());
-    SdkTracerProvider::builder()
-        .with_resource(Resource::builder().with_service_name("server2").build())
+    let provider = SdkTracerProvider::builder()
+        .with_resource(Resource::builder().with_service_name("simple-api").build())
         .with_batch_exporter(
             opentelemetry_otlp::SpanExporter::builder()
                 .with_tonic()
                 .with_protocol(Protocol::Grpc)
-                .with_endpoint("http://localhost:4317")
+                .with_endpoint("http://172.19.230.60:9821")
                 .with_timeout(Duration::from_secs(3))
                 .build()
                 .expect("Trace exporter should initialize."),
         )
-        .build()
+        .build();
+
+
+    provider
+
+}
+
+
+fn init_tracing_subscriber(tracer: opentelemetry_sdk::trace::Tracer) {
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer()) // ať vidíš logy v konzoli
+        .with(otel_layer)                        // <<< BRIDGE
+        .try_init()
+        .ok(); // vyhni se panicu, když je už jednou initnuto
 }
