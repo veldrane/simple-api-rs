@@ -18,7 +18,7 @@ use opentelemetry_sdk::{
 };
 
 // tracing
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{layer::SubscriberExt, registry};
 
 // local crate
 use crate::{
@@ -43,30 +43,32 @@ struct RouteDef {
 pub struct AppState {
     pub store: ArticleStore,
     pub log: Arc<Logger>,
-    pub metrics: Metrics
+    pub metrics: Metrics,
+    registry: prometheus::Registry,
 }
 
 impl AppState {
-    pub fn build(config: &Config, metrics: Metrics) -> Self {
+    pub fn build(config: &Config) -> Self {
 
         let store = ArticleStore::new(&ArticleList::new());
         let log = Arc::new(Logger::build(&config.log_output));
+        let registry = prometheus::Registry::new();
+        let metrics = Metrics::new(&registry);
 
-        AppState { store, log, metrics }
+        AppState { store, log, metrics, registry }
     }
 }
 
 pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
-
-    let registry = prometheus::Registry::new();
-    let state = AppState::build(&config, Metrics::new(&registry));
+    
+    let state = AppState::build(&config);
     let log = state.log.clone();
+    let exporter = PrometheusExporter::new(state.registry.clone());
     let fault_inject = FaultInject::new()
         .with_error_rate(0.1)
         .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(500))
         .with_timeout(std::time::Duration::from_secs(2))
         .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR);
-
     let tracer = init_tracer().tracer("simple-api-trace");
 
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
@@ -94,15 +96,15 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
         },
     ];
 
-    let api_only =  routes
+    let api =  routes
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
     .with(OpenTelemetryTracing::new(tracer))
     .with(fault_inject);
 
     let route=  Route::new()
-        .nest("/", api_only)
-        .nest("/metrics", PrometheusExporter::new(registry.clone()))
+        .nest("/", api)
+        .nest("/metrics", exporter)
         .data(state);
 
     log.info("Application initialized".into()).await;

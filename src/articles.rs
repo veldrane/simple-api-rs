@@ -117,7 +117,7 @@ impl ArticleList {
 #[handler]
 pub async fn get_articles(state: Data<&AppState>) -> GeneralResponse<ArticleList> {
 
-    let AppState { store, log, metrics } = *state;
+    let AppState { store, log, metrics, .. } = *state;
 
 
     log.info(format!("Fetching all articles....")).await;
@@ -130,7 +130,7 @@ pub async fn get_articles(state: Data<&AppState>) -> GeneralResponse<ArticleList
 #[handler]
 pub async fn get_article_by_id(state: Data<&AppState>, Path(id): Path<u32>) -> GeneralResponse<Article> {
 
-    let AppState { store, log, metrics } = *state;
+    let AppState { store, log, metrics, .. } = *state;
 
     log.info(format!("Fetching article by id: {}...", id)).await;
 
@@ -163,7 +163,7 @@ pub async fn post_article(state: Data<&AppState>, body: Body, _token: Token) -> 
 
     //println!("Received token: {}", token.0);
 
-    let AppState { store, log, metrics } = *state;
+    let AppState { store, log, metrics, .. } = *state;
 
     log.info(format!("Creating new article...")).await;
     let data = match body.into_bytes().await {
