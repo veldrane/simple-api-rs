@@ -13,7 +13,7 @@ use opentelemetry::{global, trace::TracerProvider as _};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator,
-    trace::{SdkTracerProvider},
+    trace::{SdkTracerProvider, SdkTracer},
     Resource,
 };
 
@@ -65,13 +65,9 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let log = state.log.clone();
     let exporter = PrometheusExporter::new(state.registry.clone());
     let fault_inject = FaultInject::default();
-    let tracer = init_tracer().tracer("simple-api-trace");
+    let tracer = init_tracer();
 
-    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
-    let subscriber = tracing_subscriber::Registry::default().with(otel_layer);
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Unable to set global subscriber.");
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -110,8 +106,9 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
 }
 
 
-fn init_tracer() -> SdkTracerProvider {
+fn init_tracer() -> SdkTracer {
     global::set_text_map_propagator(TraceContextPropagator::new());
+
     let provider = SdkTracerProvider::builder()
         .with_resource(Resource::builder().with_service_name("simple-api").build())
         .with_batch_exporter(
@@ -125,5 +122,12 @@ fn init_tracer() -> SdkTracerProvider {
         )
         .build();
 
-    provider
+    let tracer = provider.tracer("simple-api-trace");
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
+    let subscriber = tracing_subscriber::Registry::default().with(otel_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Unable to set global subscriber.");
+
+    tracer
 }
