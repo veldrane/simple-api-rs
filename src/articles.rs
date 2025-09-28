@@ -1,8 +1,8 @@
-use poem::{ handler, web::{ Data, Json, Path}, Body, IntoResponse};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::{app::AppState, auth::Token, exporter::Metrics};
+use crate::prelude::*;
+
+
+use opentelemetry::{trace::Tracer, KeyValue};
 
 
 #[derive(Clone)]
@@ -88,13 +88,13 @@ impl ArticleList {
         article.id = id;
 
         self.articles.push(article);
-        metrics.posted_articles.inc();
+        metrics.post_articles_count.inc();
         id
     }
 
     pub fn get(&self, id: u32, metrics: &Metrics) -> Option<&Article> {
         let article = self.articles.iter().find(|&article| article.id == id);
-        metrics.get_articles.inc();
+        metrics.get_articles_count.inc();
         article
     }
 
@@ -115,16 +115,40 @@ impl ArticleList {
 }
 
 #[handler]
-pub async fn get_articles(state: Data<&AppState>) -> GeneralResponse<ArticleList> {
+pub async fn get_articles(req: &Request, state: Data<&AppState>, tracer: Data<&SdkTracer>) -> GeneralResponse<ArticleList> {
 
     let AppState { store, log, metrics, .. } = *state;
+
+    let span = tracer.span_builder("app.call")
+    .with_attributes(vec![
+        KeyValue::new("part_of", "get_articles"),
+    ]);
+
+    let _ot_span = span.start(req.data::<SdkTracer>().unwrap());
+
+
+    let span = tracing::trace_span!("get_inject.call");
+    let _e = span.enter();
+
+    //let process_span = info_span!(
+    //    "endpoint.process",
+    //    fault_injected = true,
+    //    reason = "process",
+    //    endpoint = req.uri().path() as &str
+    //);
+
+    //let _eps = process_span.enter();
 
 
     log.info(format!("Fetching all articles....")).await;
 
     let articles = store.with_read(|l| l.clone()).await;
-    metrics.get_articles.inc();
+    metrics.get_articles_count.inc();
+
+    tracing::trace!(finish = true);
+
     GeneralResponse::Ok(Json(articles))
+
 }
 
 #[handler]

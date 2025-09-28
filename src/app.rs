@@ -1,34 +1,4 @@
-// std
-use std::{sync::Arc, time::Duration};
-
-// poem
-use poem::{
-    endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter},
-    get, post, middleware::{AddDataEndpoint, OpenTelemetryTracing},
-    Response, Route,
-};
-
-// OpenTelemetry
-use opentelemetry::{global, trace::TracerProvider as _};
-use opentelemetry_otlp::{Protocol, WithExportConfig};
-use opentelemetry_sdk::{
-    propagation::TraceContextPropagator,
-    trace::{SdkTracerProvider, SdkTracer},
-    Resource,
-};
-
-// tracing
-use tracing_subscriber::layer::SubscriberExt;
-
-// local crate
-use crate::{
-    articles::{get_article_by_id, get_articles, post_article, ArticleList, ArticleStore},
-    config::Config,
-    exporter::Metrics,
-    fault_inject::FaultInject,
-    logging::Logger,
-    status::up,
-};
+use crate::prelude::*;
 
 // handy alias
 type DynHandler = BoxEndpoint<'static, Response>;
@@ -64,8 +34,8 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let state = AppState::build(&config);
     let log = state.log.clone();
     let exporter = PrometheusExporter::new(state.registry.clone());
-    let fault_inject = FaultInject::default();
-    let tracer = init_tracer();
+    let fault_inject = init_fault_inject(&config, log.clone()).await;
+    let tracer = init_tracer().await;
 
 
 
@@ -91,8 +61,10 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let api =  routes
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
-    .with(OpenTelemetryTracing::new(tracer))
-    .with(fault_inject);
+    .with(OpenTelemetryTracing::new(tracer.clone()))
+    .with(fault_inject)
+    .data(tracer.clone());
+
 
     let route=  Route::new()
         .nest("/", api)
@@ -106,7 +78,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
 }
 
 
-fn init_tracer() -> SdkTracer {
+async fn init_tracer() -> SdkTracer {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let provider = SdkTracerProvider::builder()
@@ -115,7 +87,7 @@ fn init_tracer() -> SdkTracer {
             opentelemetry_otlp::SpanExporter::builder()
                 .with_tonic()
                 .with_protocol(Protocol::Grpc)
-                .with_endpoint("http://localhost:9821")
+                .with_endpoint("http://localhost:4317")
                 .with_timeout(Duration::from_secs(3))
                 .build()
                 .expect("Trace exporter should initialize."),
@@ -130,4 +102,45 @@ fn init_tracer() -> SdkTracer {
         .expect("Unable to set global subscriber.");
 
     tracer
+}
+
+async fn init_fault_inject(config: &Config, log: Arc<Logger>) -> FaultInject {
+
+    match FaultInject::try_from(&config.fault_inject) {
+        Ok(fi) => return fi,
+        Err(e) => {
+            let m: String = e.into();
+            log.error(format!("Failed to initialize fault injection middleware: {}", m)).await;
+            return fault_inject::FaultInject::default()
+        }
+    };
+}
+
+
+impl TryFrom<&FaultInjectConfig> for FaultInject {
+
+    type Error = FaultInjectError;
+
+fn try_from(value: &FaultInjectConfig) -> std::result::Result<Self, FaultInjectError> {
+    
+    if value.error_rate < 0.0 || value.error_rate > 1.0 {
+        return Err(FaultInjectError::InvalidErrorRate);
+    }
+    if value.min_delay > value.max_delay {
+        return Err(FaultInjectError::InvalidDelay);
+    }
+    if let Some(timeout) = value.timeout {
+        if timeout == 0 {
+            return Err(FaultInjectError::InvalidTimeout);
+        }
+    }
+
+    Ok(
+        FaultInject::new()
+        .with_error_rate(value.error_rate)
+        .with_delay(Duration::from_micros(value.min_delay), Duration::from_micros(value.max_delay))
+        .with_timeout(std::time::Duration::from_secs(value.timeout.unwrap_or(2)))
+        .with_status(StatusCode::from_u16(value.status_on_error).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+    )
+}
 }

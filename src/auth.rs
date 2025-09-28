@@ -1,14 +1,7 @@
 #![allow(unused_imports, unused_variables, unused_mut)]
 
-use serde::{Deserialize, Serialize};
-use poem::{
-    Endpoint, Error, FromRequest, Request, RequestBody, Result, Route, get, handler,
-    http::StatusCode
-};
 use oidc_jwt_validator::{cache::Strategy, ValidationSettings, Validator};
-
-use std::time::Duration;
-
+use crate::prelude::*;
 
 const OIDC_URL: &str = "https://idp.class.syscallx86.com:8443/realms/class.syscallx86.com";
 

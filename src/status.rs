@@ -1,6 +1,4 @@
-use poem::handler;
-
-
+use crate::prelude::*;
 
 #[handler]
 pub fn up() -> String {

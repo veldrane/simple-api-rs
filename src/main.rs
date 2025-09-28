@@ -1,5 +1,6 @@
-use poem::{ Server, listener::TcpListener};
-use simple_api_rs::{ app, config::Config};
+use simple_api_rs::prelude::*;
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
