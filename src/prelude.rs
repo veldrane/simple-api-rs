@@ -8,6 +8,7 @@ pub use crate::{
     fault_inject::{self, FaultInject, FaultInjectError},
     logging::Logger,
     status::up,
+    args::Args,
 };
 
 // Poem framework

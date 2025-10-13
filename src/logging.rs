@@ -2,8 +2,6 @@
 use tokio::sync::mpsc;
 use chrono::prelude::*;
 
-
-
 pub struct Logger {
     tx: mpsc::Sender<LogMessage>,
     _logger: tokio::task::JoinHandle<()>,
@@ -23,10 +21,10 @@ impl Logger {
         
         let log_output = get_output(output);
         let (tx, rx): (mpsc::Sender<LogMessage>, mpsc::Receiver<LogMessage>) = mpsc::channel(100);
-        let logger =   tokio::spawn(log_receiver(rx, log_output));
+        let logger_task =   tokio::spawn(log_receiver(rx, log_output));
         let logger = Logger {
             tx,
-            _logger: logger,
+            _logger: logger_task,
         };
 
         let _ = logger.tx.try_send(LogMessage(LogType::Info, "Starting logger".into()));

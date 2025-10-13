@@ -1,4 +1,5 @@
 pub mod prelude;
+pub mod args;
 pub mod config;
 pub mod app;
 pub mod status;
