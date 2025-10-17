@@ -138,7 +138,7 @@ fn try_from(value: &FaultInjectConfig) -> std::result::Result<Self, FaultInjectE
     Ok(
         FaultInject::new()
         .with_error_rate(value.error_rate)
-        .with_delay(Duration::from_micros(value.min_delay), Duration::from_micros(value.max_delay))
+        .with_delay(Duration::from_millis(value.min_delay), Duration::from_millis(value.max_delay))
         .with_timeout(std::time::Duration::from_secs(value.timeout.unwrap_or(2)))
         .with_status(StatusCode::from_u16(value.status_on_error).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
     )

@@ -34,8 +34,8 @@ impl FaultInject {
     pub fn new() -> Self {
         Self {
             error_rate: 0.0,
-            min_delay: Duration::from_micros(0),
-            max_delay: Duration::from_micros(0),
+            min_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
             timeout: None,
             status_on_error: StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -53,7 +53,7 @@ impl Default for FaultInject {
 
         FaultInject::new()
         .with_error_rate(0.1)
-        .with_delay(std::time::Duration::from_micros(50), std::time::Duration::from_micros(100))
+        .with_delay(std::time::Duration::from_millis(50), std::time::Duration::from_millis(100))
         .with_timeout(std::time::Duration::from_secs(2))
         .with_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR)
     }
@@ -107,26 +107,38 @@ impl<E: Endpoint> Endpoint for FaultInjectEndpoint<E> {
         log.info("Hello from FaultInject middleware".into()).await;
         // 1) Umělá latence
         let extra: Duration = if self.cfg.max_delay > self.cfg.min_delay {
-            let spread = self.cfg.max_delay - self.cfg.min_delay;
-            self.cfg.min_delay + Duration::from_micros(
-                rng.gen_range(0..=spread.as_micros() as u64)
+
+            let spread = (self.cfg.max_delay - self.cfg.min_delay).mul_f32(1.0 + self.cfg.error_rate*2.0);
+
+            self.cfg.min_delay + Duration::from_millis(
+                rng.gen_range(0..=spread.as_millis() as u64)
             )
         } else {
-            Duration::from_micros(0)
+            Duration::from_millis(0)
         };
         
         //let span = tracing::trace_span!(
         //    "fault.delay",
         //    fault_injected = true,
         //    reason = "delay",
-        //    delay_ms = extra.as_micros() as u64
+        //    delay_ms = extra.as_millis() as u64
         //);
 
         //let _eds = delay_span.enter();
 
 
+        if extra > self.cfg.max_delay {
+            
+            async {
+            log.info(format!("Injecting max delay of {:?}ms", self.cfg.max_delay.as_millis())).await;
+
+            sleep(Duration::from_millis(self.cfg.max_delay.as_millis() as u64)).await;
+            }.await;
+            Err(Error::from_string("Request reach maximum timeout\n", self.cfg.status_on_error))?;
+        }
+
         async {  
-            log.info(format!("Injecting delay of {:?}us", extra.as_millis())).await;
+            log.info(format!("Injecting delay of {:?}ms", extra.as_millis())).await;
             sleep(extra).await;
         }
         .await;

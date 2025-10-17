@@ -4,7 +4,7 @@
 "log": "console"
 "fault_inject":
   "error_rate": 0.3
-  "min_delay": 40
-  "max_delay": 120
+  "min_delay": 50
+  "max_delay": 500
   "timeout": 150
   "status_code": 500
