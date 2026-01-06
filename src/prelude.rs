@@ -13,7 +13,7 @@ pub use crate::{
 
 // Poem framework
 pub use poem::{
-    endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter},
+    endpoint::{BoxEndpoint, EndpointExt, PrometheusExporter, EitherEndpoint},
     get, post, middleware::{AddDataEndpoint, OpenTelemetryTracing},
     Response, Route,
     http::StatusCode,

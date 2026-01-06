@@ -61,8 +61,8 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let api =  routes
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
-    .with(OpenTelemetryTracing::new(tracer.clone()))
-    .with(fault_inject)
+    .with( OpenTelemetryTracing::new(tracer.clone()))
+    .with_result(fault_inject)
     .data(tracer.clone());
 
 
@@ -104,16 +104,9 @@ async fn init_tracer() -> SdkTracer {
     tracer
 }
 
-async fn init_fault_inject(config: &Config, log: Arc<Logger>) -> FaultInject {
+async fn init_fault_inject(config: &Config, log: Arc<Logger>) -> Result<FaultInject, FaultInjectError> {
 
-    match FaultInject::try_from(&config.fault_inject) {
-        Ok(fi) => return fi,
-        Err(e) => {
-            let m: String = e.into();
-            log.error(format!("Failed to initialize fault injection middleware: {}", m)).await;
-            return fault_inject::FaultInject::default()
-        }
-    };
+    FaultInject::try_from(&config.fault_inject)
 }
 
 
@@ -121,26 +114,54 @@ impl TryFrom<&FaultInjectConfig> for FaultInject {
 
     type Error = FaultInjectError;
 
-fn try_from(value: &FaultInjectConfig) -> std::result::Result<Self, FaultInjectError> {
-    
-    if value.error_rate < 0.0 || value.error_rate > 1.0 {
-        return Err(FaultInjectError::InvalidErrorRate);
+    fn try_from(value: &FaultInjectConfig) -> std::result::Result<Self, FaultInjectError> {
+        
+        if value.error_rate < 0.0 || value.error_rate > 1.0 {
+            return Err(FaultInjectError::InvalidErrorRate);
+        }
+        if value.min_delay > value.max_delay {
+            return Err(FaultInjectError::InvalidDelay);
+        }
+        if let Some(timeout) = value.timeout {
+            if timeout == 0 {
+                return Err(FaultInjectError::InvalidTimeout);
+            }
+        }
+
+        Ok(
+            FaultInject::new()
+            .with_error_rate(value.error_rate)
+            .with_delay(Duration::from_millis(value.min_delay), Duration::from_millis(value.max_delay))
+            .with_timeout(std::time::Duration::from_secs(value.timeout.unwrap_or(2)))
+            .with_status(StatusCode::from_u16(value.status_on_error).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+        )
     }
-    if value.min_delay > value.max_delay {
-        return Err(FaultInjectError::InvalidDelay);
-    }
-    if let Some(timeout) = value.timeout {
-        if timeout == 0 {
-            return Err(FaultInjectError::InvalidTimeout);
+}
+
+
+pub trait EndpointExtOpt: EndpointExt + Sized {
+    fn with_opt<T>(self, mw: Option<T>) -> EitherEndpoint<Self, T::Output>
+    where
+        T: Middleware<Self::Endpoint>,
+    {
+        match mw {
+            Some(mw) => EitherEndpoint::B(self.with(mw)),
+            None => EitherEndpoint::A(self),
         }
     }
 
-    Ok(
-        FaultInject::new()
-        .with_error_rate(value.error_rate)
-        .with_delay(Duration::from_millis(value.min_delay), Duration::from_millis(value.max_delay))
-        .with_timeout(std::time::Duration::from_secs(value.timeout.unwrap_or(2)))
-        .with_status(StatusCode::from_u16(value.status_on_error).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
-    )
+    fn with_result<T, E>(self, mw: std::result::Result<T, E>) -> EitherEndpoint<Self, T::Output>
+    where
+        T: Middleware<Self::Endpoint>,
+    {
+        match mw {
+            Ok(mw) => EitherEndpoint::B(self.with(mw)),
+            Err(_) => EitherEndpoint::A(self),
+        }
+    }
+
 }
-}
+
+// blanket impl pro všechny endpointy
+impl<T> EndpointExtOpt for T where T: EndpointExt + Sized {}
+
