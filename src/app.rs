@@ -58,11 +58,19 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
         },
     ];
 
+    // Order matters here: `.with()` wraps around whatever came before it,
+    // so whichever middleware is applied LAST runs FIRST per request.
+    // OpenTelemetryTracing must be outermost — it's what creates the root
+    // span and makes it the ambient OTel context for everything inside it.
+    // fault_inject (and any handler-level tracing::trace_span!) only nests
+    // correctly under ONE shared trace if it runs *inside* that context.
+    // Swapping this order silently splits every request into two
+    // unrelated traces instead of one (verified in tests/otel_trace_shape.rs).
     let api =  routes
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
-    .with( OpenTelemetryTracing::new(tracer.clone()))
-    .with_result(fault_inject);
+    .with_result(fault_inject)
+    .with( OpenTelemetryTracing::new(tracer.clone()));
 
 
     let route=  Route::new()
