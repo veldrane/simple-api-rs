@@ -35,7 +35,18 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let log = state.log.clone();
     let exporter = PrometheusExporter::new(state.registry.clone());
     let fault_inject = init_fault_inject(&config, log.clone()).await;
-    let tracer = otel::init();
+    let tracer = match otel::init(&config.otel) {
+        Ok(tracer) => Some(tracer),
+        Err(otel::OtelError::Disabled) => {
+            log.info("OpenTelemetry tracing disabled via config".into()).await;
+            None
+        },
+        Err(e) => {
+            let msg: String = e.into();
+            log.warn(format!("OpenTelemetry tracing disabled: {}", msg)).await;
+            None
+        },
+    };
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -70,7 +81,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
     .with_result(fault_inject)
-    .with( OpenTelemetryTracing::new(tracer.clone()));
+    .with_opt(tracer.map(OpenTelemetryTracing::new));
 
 
     let route=  Route::new()

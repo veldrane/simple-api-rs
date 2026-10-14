@@ -9,7 +9,8 @@ pub struct Config {
     pub prefix: String,
     pub addr: String,
     pub log_output: String,
-    pub fault_inject: FaultInjectConfig
+    pub fault_inject: FaultInjectConfig,
+    pub otel: OtelConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +38,32 @@ impl default::Default for FaultInjectConfig {
             max_delay: 100,
             timeout: Some(2),
             status_on_error: 500,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OtelConfig {
+    pub enabled: bool,          // turns OTel tracing on/off entirely
+    pub endpoint: String,       // OTLP/gRPC collector endpoint
+    pub service_name: String,   // reported as the `service.name` resource attribute
+    pub timeout: u64,           // exporter timeout, in seconds
+}
+
+impl OtelConfig {
+    pub fn with_enabled(mut self, enabled: bool) -> Self { self.enabled = enabled; self }
+    pub fn with_endpoint(mut self, endpoint: &str) -> Self { self.endpoint = endpoint.into(); self }
+    pub fn with_service_name(mut self, name: &str) -> Self { self.service_name = name.into(); self }
+    pub fn with_timeout(mut self, timeout: u64) -> Self { self.timeout = timeout; self }
+}
+
+impl Default for OtelConfig {
+    fn default() -> Self {
+        OtelConfig {
+            enabled: true,
+            endpoint: String::from("http://localhost:4317"),
+            service_name: String::from("simple-api"),
+            timeout: 3,
         }
     }
 }
@@ -70,6 +97,11 @@ impl Config {
         self
     }
 
+    pub fn with_otel(mut self, otel: OtelConfig) -> Self {
+        self.otel = otel;
+        self
+    }
+
 }
 
 impl Default for Config {
@@ -80,6 +112,7 @@ impl Default for Config {
             addr: String::from("0.0.0.0"),
             log_output: String::from("console"),
             fault_inject: FaultInjectConfig::default(),
+            otel: OtelConfig::default(),
         }
     }
 }
@@ -131,10 +164,13 @@ impl ConfigLoader for FileConfigLoader {
                                 let fi_config = get_file_inject_config(v);
                                     config = config.with_fault_inject(fi_config);
                                 },
+                            Value::String(s) if s == "otel" => {
+                                let otel_config = get_otel_config(v);
+                                config = config.with_otel(otel_config);
+                                },
                             _ => continue
                             }
                         }
-                        // nested mapping - currently not used
 
                     _ => continue,
                     }
@@ -181,6 +217,52 @@ fn get_file_inject_config(v: Value) -> FaultInjectConfig   {
         _ => {}
     }
 
-    fi_config   
-    
+    fi_config
+
+}
+
+fn get_otel_config(v: Value) -> OtelConfig {
+
+    let mut otel_config = OtelConfig::default();
+
+    match v {
+        Value::Mapping(otel_map) => {
+            for (otel_k, otel_v) in otel_map {
+                match otel_v {
+                    Value::Bool(b) => {
+                        match otel_k {
+                            Value::String(s) if s == "enabled" => {
+                                otel_config = otel_config.with_enabled(b);
+                            },
+                            _ => continue,
+                        }
+                    },
+                    Value::String(_) => {
+                        match otel_k {
+                            Value::String(s) if s == "endpoint" => {
+                                otel_config = otel_config.with_endpoint(otel_v.as_str().unwrap());
+                            },
+                            Value::String(s) if s == "service_name" => {
+                                otel_config = otel_config.with_service_name(otel_v.as_str().unwrap());
+                            },
+                            _ => continue,
+                        }
+                    },
+                    Value::Number(_) => {
+                        match otel_k {
+                            Value::String(s) if s == "timeout" => {
+                                otel_config = otel_config.with_timeout(otel_v.as_u64().unwrap());
+                            },
+                            _ => continue,
+                        }
+                    },
+                    _ => continue,
+                }
+            }
+        },
+        _ => {}
+    }
+
+    otel_config
+
 }

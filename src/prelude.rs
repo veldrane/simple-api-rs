@@ -1,7 +1,7 @@
 // Re-export commonly used items for easier access
 pub use crate::{
     articles::{get_article_by_id, get_articles, post_article, ArticleList, ArticleStore},
-    config::{ Config, FaultInjectConfig},
+    config::{ Config, FaultInjectConfig, OtelConfig},
     app,
     otel,
     {app::AppState, auth::Auth},
