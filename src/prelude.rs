@@ -3,7 +3,8 @@ pub use crate::{
     articles::{get_article_by_id, get_articles, post_article, ArticleList, ArticleStore},
     config::{ Config, FaultInjectConfig},
     app,
-    {app::AppState, auth::Token},
+    otel,
+    {app::AppState, auth::Auth},
     exporter::Metrics,
     fault_inject::{self, FaultInject, FaultInjectError},
     logging::Logger,
@@ -34,6 +35,7 @@ pub use opentelemetry_sdk::{
 
 // Tracing
 pub use tracing_subscriber::layer::SubscriberExt;
+pub use tracing::Instrument;
 
 //Serde
 pub use serde::{Deserialize, Serialize};

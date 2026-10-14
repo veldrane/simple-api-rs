@@ -79,95 +79,60 @@ impl<E: Endpoint> Endpoint for FaultInjectEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
-        
-        //let cx = tracing::Span::current().context();
-        //let span= req.extensions().get::<tracing::Span>().unwrap().clone();
-        //let instrumented = req.data::<SdkTracer>().unwrap();
-        //let span = instrumented.in_current_span().clone();
-        //let _e = span.enter();
-
-        let span = req.data::<SdkTracer>().unwrap().span_builder("app.call")
-            .with_attributes(vec![
-                KeyValue::new("part_of", "fault_inject"),
-            ]);
-
-        let _ot_span = span.start(req.data::<SdkTracer>().unwrap());
-
-        
-        
+        // A plain tracing span is enough: poem's `OpenTelemetryTracing`
+        // middleware already made its request-span the ambient OTel
+        // context, so `tracing-opentelemetry` links this span under it
+        // automatically (same trace_id) — no manual OTel span needed here.
+        // The whole body is wrapped with `.instrument(span)` rather than
+        // `span.enter()` because this function `.await`s (entering a span
+        // and holding the guard across an `.await` point corrupts span
+        // data once requests interleave on the same worker thread).
         let span = tracing::trace_span!("fault_inject.call");
-        let _e = span.enter();
 
-        let mut rng = rand::rngs::OsRng;
-        let data = req.data::<AppState>().unwrap();
-        let log = &data.log.clone();
+        async move {
+            let mut rng = rand::rngs::OsRng;
+            let data = req.data::<AppState>().unwrap();
+            let log = &data.log.clone();
 
+            log.info("Hello from FaultInject middleware".into()).await;
 
+            // 1) Umělá latence
+            let extra: Duration = if self.cfg.max_delay > self.cfg.min_delay {
+                let spread = (self.cfg.max_delay - self.cfg.min_delay).mul_f32(1.0 + self.cfg.error_rate * 2.0);
 
-        log.info("Hello from FaultInject middleware".into()).await;
-        // 1) Umělá latence
-        let extra: Duration = if self.cfg.max_delay > self.cfg.min_delay {
+                self.cfg.min_delay + Duration::from_millis(
+                    rng.gen_range(0..=spread.as_millis() as u64)
+                )
+            } else {
+                Duration::from_millis(0)
+            };
 
-            let spread = (self.cfg.max_delay - self.cfg.min_delay).mul_f32(1.0 + self.cfg.error_rate*2.0);
+            if extra > self.cfg.max_delay {
+                log.info(format!("Injecting max delay of {:?}ms", self.cfg.max_delay.as_millis())).await;
+                sleep(self.cfg.max_delay).await;
+                return Err(Error::from_string("Request reach maximum timeout\n", self.cfg.status_on_error));
+            }
 
-            self.cfg.min_delay + Duration::from_millis(
-                rng.gen_range(0..=spread.as_millis() as u64)
-            )
-        } else {
-            Duration::from_millis(0)
-        };
-        
-        //let span = tracing::trace_span!(
-        //    "fault.delay",
-        //    fault_injected = true,
-        //    reason = "delay",
-        //    delay_ms = extra.as_millis() as u64
-        //);
-
-        //let _eds = delay_span.enter();
-
-
-        if extra > self.cfg.max_delay {
-            
-            async {
-            log.info(format!("Injecting max delay of {:?}ms", self.cfg.max_delay.as_millis())).await;
-
-            sleep(Duration::from_millis(self.cfg.max_delay.as_millis() as u64)).await;
-            }.await;
-            Err(Error::from_string("Request reach maximum timeout\n", self.cfg.status_on_error))?;
-        }
-
-        async {  
             log.info(format!("Injecting delay of {:?}ms", extra.as_millis())).await;
             sleep(extra).await;
+
+            tracing::trace!(delay_finish = true);
+
+            let res = self.inner.call(req).await;
+
+            match res {
+                Ok(resp) => {
+                    let rsp = resp.into_response();
+                    log.info("Response from endpoints has been ok".into()).await;
+                    Ok(rsp)
+                },
+                Err(e) => {
+                    log.error(format!("FaultInject middleware: {:?}", e)).await;
+                    Err(e)
+                },
+            }
         }
-        .await;
-
-        tracing::trace!(delay_finish = true);
-        drop(_e);
-
-        //log.info(format!("Injecting delay of {:?}ms", extra.as_millis())).await;
-        //sleep(extra).await;
-
-        //drop(_eds);
-        // 2) Fuzzy chyba
-        //if rng.gen_range(0.0f32..1.0f32) < self.cfg.error_rate {
-        //    return Ok(GeneralResponse::<()>::InternalError.into_response());
-        //}
-
-
-        let res = self.inner.call(req).await;
-
-        match res {
-            Ok(resp) => {
-                let rsp = resp.into_response();
-                log.info("Response from endpoints has been ok".into()).await;
-                Ok(rsp)
-            },
-            Err(e) => {
-                log.error(format!("FaultInject middleware: {:?}", e)).await;
-                Err(e)
-            },
-        }
+        .instrument(span)
+        .await
     }
 }

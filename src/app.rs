@@ -35,9 +35,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     let log = state.log.clone();
     let exporter = PrometheusExporter::new(state.registry.clone());
     let fault_inject = init_fault_inject(&config, log.clone()).await;
-    let tracer = init_tracer().await;
-
-
+    let tracer = otel::init();
 
     let routes: Vec<RouteDef> = vec![
         RouteDef {
@@ -53,8 +51,10 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
             handler: get(get_article_by_id).boxed(),
         },
         RouteDef {
+            // only this route needs auth, so the middleware is attached
+            // to the single endpoint rather than the whole app
             path: "/api/v1/article",
-            handler: post(post_article).boxed(),
+            handler: post(post_article).with(Auth::new()).boxed(),
         },
     ];
 
@@ -62,8 +62,7 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     .into_iter()
     .fold(Route::new(), |app, def| app.at(def.path, def.handler))
     .with( OpenTelemetryTracing::new(tracer.clone()))
-    .with_result(fault_inject)
-    .data(tracer.clone());
+    .with_result(fault_inject);
 
 
     let route=  Route::new()
@@ -77,32 +76,6 @@ pub async fn builder(config: &Config) -> AddDataEndpoint<Route, AppState> {
     route
 }
 
-
-async fn init_tracer() -> SdkTracer {
-    global::set_text_map_propagator(TraceContextPropagator::new());
-
-    let provider = SdkTracerProvider::builder()
-        .with_resource(Resource::builder().with_service_name("simple-api").build())
-        .with_batch_exporter(
-            opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .with_protocol(Protocol::Grpc)
-                .with_endpoint("http://localhost:4317")
-                .with_timeout(Duration::from_secs(3))
-                .build()
-                .expect("Trace exporter should initialize."),
-        )
-        .build();
-
-    let tracer = provider.tracer("simple-api-trace");
-    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer.clone());
-    let subscriber = tracing_subscriber::Registry::default().with(otel_layer);
-
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Unable to set global subscriber.");
-
-    tracer
-}
 
 async fn init_fault_inject(config: &Config, log: Arc<Logger>) -> Result<FaultInject, FaultInjectError> {
 

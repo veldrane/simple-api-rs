@@ -4,9 +4,8 @@ Sepsáno po průchodu celým `src/` (1015 řádků) před PR do `master`. Řazen
 
 ## 🔴 Bugy / bezpečnost — řešit před mergem
 
-- [ ] **Auth je úplně vyřazená.** `Token::from_request` ([src/auth.rs:11](src/auth.rs#L11)) naparsuje Bearer token do `_token`, ale vrací vždy `Token("".to_string())` — hodnota se nikam nepropaguje. `post_article` ([src/articles.rs:177](src/articles.rs#L177)) token přijme jako `_token: Token` a dál ho ignoruje, `validate_token()` se nikde nevolá (celé je zakomentované, řádky 179–186 a 183–186). Efekt: `POST /api/v1/article` je dnes bez ochrany.
-  - Rozhodnout: buď dotáhnout OIDC validaci (odkomentovat a zapojit `validate_token()`), nebo auth vědomě vypnout a smazat mrtvý OIDC kód (`oidc_jwt_validator` dependency, `OIDC_URL`, `validate_token`), aby nepůsobil dojem funkční featury.
-  - Smazat `#![allow(unused_imports, unused_variables, unused_mut)]` z vrchu `auth.rs` — maskuje právě tenhle problém, kompilátor by jinak varoval.
+- [x] ~~**Auth je úplně vyřazená.**~~ **Hotovo na `claude-polishing`.** `auth.rs` je přepsaný na poem middleware `Auth` (stejný vzor jako `FaultInject`), attachnutý jen na `/api/v1/article` ([src/app.rs](src/app.rs)) — čte `Authorization: Bearer`, validuje přes OIDC a request bez platného tokenu nikdy nedojde k handleru (403 dřív, než se zavolá `post_article`). Starý `Token: FromRequest` extraktor (co vždy vracel prázdný token) i blanketní `#![allow(unused_...)]` jsou pryč.
+  - ⚠️ **Behaviorální změna:** dřív byl endpoint fakticky bez ochrany, teď reálně vynucuje OIDC validaci proti `OIDC_URL` (`https://idp.class.syscallx86.com:8443/...`) — pokud tenhle IDP není v dev prostředí dostupný, `POST /api/v1/article` bude vracet 403 i s platným requestem. Zvážit, jestli chceš možnost auth v dev/local vypnout (např. přes config flag, podobně jako `with_result(fault_inject)`).
 
 - [ ] **Jednotky delay v config neodpovídají použití.** `FaultInjectConfig.min_delay`/`max_delay` komentář v [src/config.rs:18-19](src/config.rs#L18) říká „v mikrosekundách", ale [src/app.rs:134](src/app.rs#L134) je interpretuje jako milisekundy (`Duration::from_millis`). Oprav komentář nebo převod — ať sedí.
 
@@ -20,13 +19,12 @@ Sepsáno po průchodu celým `src/` (1015 řádků) před PR do `master`. Řazen
 
 ## 🟡 Konzistence / architektura (k debatě)
 
-- [ ] **`src/otel.rs` je prázdná slupka** (`// TODO - Maybe !`), skutečná OTel inicializace žije v `app.rs::init_tracer()`. Rozhodnout novou strukturu (probereme architekturu zvlášť).
+- [x] ~~**`src/otel.rs` je prázdná slupka**~~ **Hotovo na `claude-polishing`.** Inicializace (propagator, OTLP exporter, global tracing subscriber) přesunutá z `app.rs` do `src/otel.rs::init()` (a modul teď konečně i reálně zapojený v `lib.rs` — dřív tam vůbec nebyl přes `pub mod otel;`, takže se ani nekompiloval). Root span pro request dál dělá poem's vlastní `OpenTelemetryTracing` middleware (`app.rs`, beze změny — to už byl správný "best practice" kus). Ruční OTel `Tracer::span_builder()` volání v `fault_inject.rs` a `articles.rs` jsou pryč — nahrazená čistými `tracing::trace_span!(...).instrument(...)`, které se díky `tracing-opentelemetry` automaticky zavěsí pod request-span (ambient OTel context nastavený middlewarem). Mimochodem to i opravilo skrytý bug: `fault_inject.rs` dřív dělal `span.enter()` a držel guard přes `.await` (`sleep(...)`) — to korumpuje span data, jakmile se requesty prokládají na stejném vlákně; `.instrument()` je async-safe varianta.
 - [ ] **YAML parsing je "type-first" místo "key-first"** ([src/config.rs:105-141](src/config.rs#L105)) — větví se nejdřív podle typu hodnoty, pak podle klíče. `port: "8080"` (string místo čísla) se tiše ignoruje místo chyby. Zvážit přepsání na match-podle-klíče s explicitní konverzí/chybou.
 - [ ] Zavádějící komentář `// nested mapping - currently not used` ([src/config.rs:137](src/config.rs#L137)) hned pod kódem, který nested mapping (`fault_inject`) právě zpracovává.
 - [ ] `use std::default;` + `impl default::Default for FaultInjectConfig` ([src/config.rs:1](src/config.rs#L1), [:32](src/config.rs#L32)) vs. plain `impl Default for Config` o pár řádků níž ve stejném souboru — sjednotit styl.
 - [ ] `main.rs` dumpuje config přes `println!` ([src/main.rs:8](src/main.rs#L8)) místo přes `Logger`, který appka jinak používá — sjednotit, nebo vědomě nechat jako bootstrap-only výjimku s komentářem proč.
-- [ ] Duplicitní získávání traceru (`req.data::<SdkTracer>().unwrap()` dvakrát za sebou v [src/fault_inject.rs:89,94](src/fault_inject.rs#L89) a v [src/articles.rs:122-127](src/articles.rs#L122), kde handler už má `tracer: Data<&SdkTracer>` injectnutý).
-- [ ] Hromady zakomentovaného starého span/tracing kódu (3 generace pokusů navrstvené na sobě) v `fault_inject.rs` ([src/fault_inject.rs:83-87,120-127,149-156](src/fault_inject.rs#L83)) a `articles.rs` ([src/articles.rs:133-140](src/articles.rs#L133)) — vyčistit, až se ustálí finální otel přístup.
+- [x] ~~Duplicitní získávání traceru~~ a ~~hromady zakomentovaného starého span/tracing kódu~~ — **hotovo na `claude-polishing`** jako součást úklidu výše (`fault_inject.rs`, `articles.rs` nepotřebují `Data<&SdkTracer>`/`req.data::<SdkTracer>()` vůbec, stačí `tracing::trace_span!`).
 
 ## 🟢 Housekeeping
 

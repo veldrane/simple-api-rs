@@ -1,10 +1,6 @@
 use tokio::sync::RwLock;
 use crate::prelude::*;
 
-
-use opentelemetry::{trace::Tracer, KeyValue};
-
-
 #[derive(Clone)]
 pub struct ArticleStore(Arc<RwLock<ArticleList>>);
 
@@ -115,40 +111,26 @@ impl ArticleList {
 }
 
 #[handler]
-pub async fn get_articles(req: &Request, state: Data<&AppState>, tracer: Data<&SdkTracer>) -> GeneralResponse<ArticleList> {
+pub async fn get_articles(state: Data<&AppState>) -> GeneralResponse<ArticleList> {
 
     let AppState { store, log, metrics, .. } = *state;
 
-    let span = tracer.span_builder("app.call")
-    .with_attributes(vec![
-        KeyValue::new("part_of", "get_articles"),
-    ]);
+    // plain tracing span — see the comment in fault_inject.rs::call for why
+    // this is enough to get a properly linked child span under OpenTelemetry.
+    let span = tracing::trace_span!("get_articles");
 
-    let _ot_span = span.start(req.data::<SdkTracer>().unwrap());
+    async move {
+        log.info(format!("Fetching all articles....")).await;
 
+        let articles = store.with_read(|l| l.clone()).await;
+        metrics.get_articles_count.inc();
 
-    let span = tracing::trace_span!("get_inject.call");
-    let _e = span.enter();
+        tracing::trace!(finish = true);
 
-    //let process_span = info_span!(
-    //    "endpoint.process",
-    //    fault_injected = true,
-    //    reason = "process",
-    //    endpoint = req.uri().path() as &str
-    //);
-
-    //let _eps = process_span.enter();
-
-
-    log.info(format!("Fetching all articles....")).await;
-
-    let articles = store.with_read(|l| l.clone()).await;
-    metrics.get_articles_count.inc();
-
-    tracing::trace!(finish = true);
-
-    GeneralResponse::Ok(Json(articles))
-
+        GeneralResponse::Ok(Json(articles))
+    }
+    .instrument(span)
+    .await
 }
 
 #[handler]
@@ -173,19 +155,11 @@ pub async fn get_article_by_id(state: Data<&AppState>, Path(id): Path<u32>) -> G
 
 }
 
+// token validation happens in the `Auth` middleware (see auth.rs), which
+// is attached to this route in app.rs — by the time this handler runs,
+// the request already carries a valid bearer token.
 #[handler]
-pub async fn post_article(state: Data<&AppState>, body: Body, _token: Token) -> GeneralResponse<Article> {
-
-    //if token.0.is_empty() {
-    //    return GeneralResponse::Forbidden;
-    //}
-
-    //match token.validate_token().await {
-    //    Ok(_) => (),
-    //    Err(_) => return GeneralResponse::Forbidden,
-    //}
-
-    //println!("Received token: {}", token.0);
+pub async fn post_article(state: Data<&AppState>, body: Body) -> GeneralResponse<Article> {
 
     let AppState { store, log, metrics, .. } = *state;
 
