@@ -7,4 +7,9 @@
   "min_delay": 50
   "max_delay": 500
   "timeout": 150
-  "status_code": 500
+  "status_on_error": 500
+"otel":
+  "enabled": true
+  "endpoint": "http://localhost:4317"
+  "service_name": "simple-api"
+  "timeout": 3
